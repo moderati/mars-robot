@@ -1,36 +1,53 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Robot Concierge Kiosk (Next.js + Custom Vapi Controls)
 
-## Getting Started
+A barebones iPad-friendly kiosk web app built with Next.js App Router, Tailwind CSS, and TypeScript.
 
-First, run the development server:
+## Setup
+
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Create `.env.local` in the project root:
+
+```env
+NEXT_PUBLIC_VAPI_PUBLIC_KEY="...public key from Vapi..."
+NEXT_PUBLIC_VAPI_ASSISTANT_ID="...assistant id..."
+```
+
+## Run Locally
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Production Build
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run build
+npm run start
+```
 
-## Learn More
+## Kiosk Behavior
 
-To learn more about Next.js, take a look at the following resources:
+- `Wake Robot` requests microphone permission from a user gesture.
+- On success, tracks are stopped immediately and kiosk state is persisted in `localStorage` (`robot_armed=true`).
+- `Start` begins a voice session using Vapi Web SDK (`@vapi-ai/web`) with your assistant ID.
+- No embedded widget UI. Controls are custom and centered for kiosk layout.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## iPad Kiosk Tips
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- Use Safari for reliable microphone permission prompts.
+- Turn on **Guided Access** in iPad settings to lock to kiosk mode.
+- Set **Auto-Lock** to Never (or longest available duration) while on kiosk power.
+- Keep device plugged in and disable low power mode.
 
-## Deploy on Vercel
+## Mic Permission Troubleshooting
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- If mic permission is denied, tap the browser/site settings and allow microphone.
+- In iPad settings, check `Safari > Microphone` (or browser microphone settings) and set to **Allow**.
+- If state is stuck, clear local storage key `robot_armed` and refresh.
