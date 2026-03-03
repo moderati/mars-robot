@@ -8,6 +8,7 @@ const armedStoreListeners = new Set<() => void>();
 
 export type KioskStatus =
   | "error"
+  | "reconnecting"
   | "stopping"
   | "speaking"
   | "inCall"
@@ -21,14 +22,18 @@ type UseRobotKioskControllerParams = {
 
 type KioskState = {
   error: string | null;
+  isReconnecting: boolean;
   isStopping: boolean;
   isSpeaking: boolean;
   inCall: boolean;
   armed: boolean;
 };
 
+type NetworkBadgeTone = "neutral" | "good" | "warn" | "bad";
+
 const STATUS_TEXT: Record<KioskStatus, string> = {
   error: "",
+  reconnecting: "Connection dropped. Reconnecting...",
   stopping: "Stopping call...",
   speaking: "Robot is talking",
   inCall: "Listening...",
@@ -36,35 +41,121 @@ const STATUS_TEXT: Record<KioskStatus, string> = {
   locked: "Tap Wake Robot to enable microphone",
 };
 
+function normalizeText(value: unknown): string {
+  return typeof value === "string" ? value.toLowerCase() : "";
+}
+
+function mapNumericQuality(value: number): string {
+  if (value >= 3) return "good";
+  if (value >= 2) return "fair";
+  if (value >= 1) return "poor";
+  return "bad";
+}
+
+function getNetworkLabelFromEvent(event: unknown): string | null {
+  if (typeof event === "string") {
+    return normalizeText(event);
+  }
+
+  if (typeof event === "number") {
+    return mapNumericQuality(event);
+  }
+
+  if (!event || typeof event !== "object") return null;
+
+  const asRecord = event as Record<string, unknown>;
+  const candidates = [
+    asRecord.quality,
+    asRecord.networkQuality,
+    asRecord.connectionQuality,
+    asRecord.threshold,
+    asRecord.level,
+    asRecord.state,
+    asRecord.status,
+    asRecord.network,
+    asRecord.connection,
+    asRecord.current,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "number") {
+      return mapNumericQuality(candidate);
+    }
+    const value = normalizeText(candidate);
+    if (value) return value;
+
+    if (candidate && typeof candidate === "object") {
+      const nested = candidate as Record<string, unknown>;
+      const nestedValue =
+        normalizeText(nested.quality) ||
+        normalizeText(nested.status) ||
+        normalizeText(nested.state) ||
+        normalizeText(nested.level) ||
+        normalizeText(nested.value);
+      if (nestedValue) return nestedValue;
+
+      if (typeof nested.value === "number") {
+        return mapNumericQuality(nested.value);
+      }
+      if (typeof nested.level === "number") {
+        return mapNumericQuality(nested.level);
+      }
+    }
+  }
+
+  return null;
+}
+
+function getNetworkTone(label: string): NetworkBadgeTone {
+  if (["excellent", "good", "great", "high", "connected", "online"].includes(label)) {
+    return "good";
+  }
+  if (["fair", "ok", "medium", "recovering", "reconnecting"].includes(label)) {
+    return "warn";
+  }
+  if (
+    ["poor", "low", "bad", "offline", "disconnected", "failed", "error"].includes(
+      label
+    )
+  ) {
+    return "bad";
+  }
+  return "neutral";
+}
+
 // Reads persisted armed state from localStorage on the client.
-// This is used by useSyncExternalStore as the client snapshot.
 function getArmedSnapshot() {
   if (typeof window === "undefined") return false;
   return window.localStorage.getItem(STORAGE_KEY) === "true";
 }
 
-// SSR fallback snapshot. We always start locked during server render
-// to avoid hydration mismatch with client-only localStorage state.
+// SSR fallback snapshot to prevent hydration mismatches.
 function getArmedServerSnapshot() {
   return false;
 }
 
-// Registers listeners for the local armed-state store.
-// useSyncExternalStore requires subscribe/getSnapshot/serverSnapshot.
+// Subscription API required by useSyncExternalStore.
 function subscribeArmedStore(listener: () => void) {
   armedStoreListeners.add(listener);
   return () => armedStoreListeners.delete(listener);
 }
 
-// Notifies all subscribed components that armed-state changed.
+// Broadcasts local armed-state changes to subscribers.
 function notifyArmedStoreChange() {
   armedStoreListeners.forEach((listener) => listener());
 }
 
-// Converts raw state flags into one canonical UI status.
-// This keeps rendering simple and guarantees one status at a time.
-function resolveKioskStatus({ error, isStopping, isSpeaking, inCall, armed }: KioskState): KioskStatus {
+// Collapses raw flags to one canonical status for UI rendering.
+function resolveKioskStatus({
+  error,
+  isReconnecting,
+  isStopping,
+  isSpeaking,
+  inCall,
+  armed,
+}: KioskState): KioskStatus {
   if (error) return "error";
+  if (isReconnecting) return "reconnecting";
   if (isStopping) return "stopping";
   if (isSpeaking) return "speaking";
   if (inCall) return "inCall";
@@ -73,14 +164,15 @@ function resolveKioskStatus({ error, isStopping, isSpeaking, inCall, armed }: Ki
 }
 
 // Requests microphone permission from a user gesture.
-// Prefers modern getUserMedia and falls back to webkitGetUserMedia for older Safari.
+// Includes webkit fallback for older Safari versions.
 async function requestMicrophonePermission(): Promise<MediaStream> {
   const modernGetUserMedia = navigator.mediaDevices?.getUserMedia?.bind(
     navigator.mediaDevices
   );
 
-  if (modernGetUserMedia) return modernGetUserMedia({ audio: true });
-  
+  if (modernGetUserMedia) {
+    return modernGetUserMedia({ audio: true });
+  }
 
   const legacyGetUserMedia = (
     navigator as Navigator & {
@@ -92,8 +184,9 @@ async function requestMicrophonePermission(): Promise<MediaStream> {
     }
   ).webkitGetUserMedia;
 
-  if (!legacyGetUserMedia) throw new Error("microphone_api_unavailable");
-  
+  if (!legacyGetUserMedia) {
+    throw new Error("microphone_api_unavailable");
+  }
 
   return new Promise((resolve, reject) => {
     legacyGetUserMedia.call(
@@ -105,13 +198,12 @@ async function requestMicrophonePermission(): Promise<MediaStream> {
   });
 }
 
-// Main kiosk controller hook:
-// owns Vapi lifecycle, microphone gating, call controls, and derived UI state.
+// Main kiosk controller hook.
+// Owns Vapi lifecycle, call controls, mic unlock, and derived status.
 export function useRobotKioskController({
   publicKey,
   assistantId,
 }: UseRobotKioskControllerParams) {
-  // "armed" is persisted outside React so refreshes keep kiosk unlocked.
   const armed = useSyncExternalStore(
     subscribeArmedStore,
     getArmedSnapshot,
@@ -119,23 +211,27 @@ export function useRobotKioskController({
   );
 
   const vapiRef = useRef<Vapi | null>(null);
+  const webCallRef = useRef<Parameters<Vapi["reconnect"]>[0] | null>(null);
+  const stopRequestedRef = useRef(false);
+  const reconnectAttemptsRef = useRef(0);
+
   const [isStarting, setIsStarting] = useState(false);
   const [inCall, setInCall] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [networkLabel, setNetworkLabel] = useState("unknown");
+  const [networkTone, setNetworkTone] = useState<NetworkBadgeTone>("neutral");
 
-  // Resets transient call flags back to idle.
-  // Used across end/error paths to avoid repeated state logic.
   function resetCallState() {
     setIsStarting(false);
     setIsStopping(false);
     setInCall(false);
     setIsSpeaking(false);
+    setIsReconnecting(false);
   }
 
-  // Creates the Vapi instance and wires runtime event listeners.
-  // Cleanup detaches listeners and ends any active call on unmount.
   useEffect(() => {
     const vapi = new Vapi(publicKey);
     vapiRef.current = vapi;
@@ -143,11 +239,43 @@ export function useRobotKioskController({
     const handleCallStart = () => {
       setInCall(true);
       setIsStarting(false);
+      setIsReconnecting(false);
+      setNetworkLabel("connected");
+      setNetworkTone("good");
       setError(null);
     };
 
-    const handleCallEnd = () =>  resetCallState();
-    
+    const handleCallEnd = () => {
+      const shouldAttemptReconnect =
+        !stopRequestedRef.current &&
+        reconnectAttemptsRef.current < 1 &&
+        webCallRef.current != null;
+
+      if (!shouldAttemptReconnect) {
+        resetCallState();
+        setNetworkLabel("disconnected");
+        setNetworkTone("bad");
+        stopRequestedRef.current = false;
+        reconnectAttemptsRef.current = 0;
+        return;
+      }
+
+      reconnectAttemptsRef.current += 1;
+      setIsReconnecting(true);
+      setInCall(false);
+      setIsSpeaking(false);
+      const savedWebCall = webCallRef.current;
+
+      if (!savedWebCall) {
+        resetCallState();
+        return;
+      }
+
+      void vapi.reconnect(savedWebCall).catch(() => {
+        resetCallState();
+        setError("Connection dropped and reconnect failed. Tap Start to begin a new call.");
+      });
+    };
 
     const handleError = () => {
       resetCallState();
@@ -156,13 +284,34 @@ export function useRobotKioskController({
       );
     };
 
-    const handleSpeechStart = () => setIsSpeaking(true);
-    const handleSpeechEnd = () => setIsSpeaking(false);
+    const handleSpeechStart = () => {
+      setIsSpeaking(true);
+    };
+
+    const handleSpeechEnd = () => {
+      setIsSpeaking(false);
+    };
+
+    const handleNetworkQuality = (event: unknown) => {
+      const label = getNetworkLabelFromEvent(event);
+      if (!label) return;
+      setNetworkLabel(label);
+      setNetworkTone(getNetworkTone(label));
+    };
+
+    const handleNetworkConnection = (event: unknown) => {
+      const label = getNetworkLabelFromEvent(event);
+      if (!label) return;
+      setNetworkLabel(label);
+      setNetworkTone(getNetworkTone(label));
+    };
 
     vapi.on("call-start", handleCallStart);
     vapi.on("call-end", handleCallEnd);
     vapi.on("speech-start", handleSpeechStart);
     vapi.on("speech-end", handleSpeechEnd);
+    vapi.on("network-quality-change", handleNetworkQuality);
+    vapi.on("network-connection", handleNetworkConnection);
     vapi.on("error", handleError);
 
     return () => {
@@ -170,14 +319,14 @@ export function useRobotKioskController({
       vapi.off("call-end", handleCallEnd);
       vapi.off("speech-start", handleSpeechStart);
       vapi.off("speech-end", handleSpeechEnd);
+      vapi.off("network-quality-change", handleNetworkQuality);
+      vapi.off("network-connection", handleNetworkConnection);
       vapi.off("error", handleError);
       void vapi.stop();
       vapiRef.current = null;
     };
   }, [publicKey]);
 
-  // Unlocks kiosk by requesting mic permission once, then immediately
-  // stopping tracks so we're not recording outside active conversations.
   async function wakeRobot() {
     setError(null);
 
@@ -197,17 +346,47 @@ export function useRobotKioskController({
     }
   }
 
-  // Starts a Vapi call with the configured assistant.
-  // Guard clauses prevent duplicate starts or invalid states.
   async function startConversation() {
-    if (!armed || !vapiRef.current || isStarting || inCall) {
+    if (!armed || !vapiRef.current || isStarting || inCall || isReconnecting) {
       return;
     }
 
     try {
+      stopRequestedRef.current = false;
+      reconnectAttemptsRef.current = 0;
       setError(null);
       setIsStarting(true);
-      await vapiRef.current.start(assistantId);
+
+      const webCall = await vapiRef.current.start(
+        assistantId,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { roomDeleteOnUserLeaveEnabled: false }
+      );
+
+      if (webCall) {
+        const reconnectPayload = webCall as unknown as {
+          webCallUrl?: string;
+          transport?: { callUrl?: string };
+          id?: string;
+          artifactPlan?: { videoRecordingEnabled?: boolean };
+          assistant?: { voice?: { provider?: string } };
+        };
+
+        const webCallUrl =
+          reconnectPayload.webCallUrl ?? reconnectPayload.transport?.callUrl;
+
+        if (webCallUrl) {
+          webCallRef.current = {
+            webCallUrl,
+            id: reconnectPayload.id,
+            artifactPlan: reconnectPayload.artifactPlan,
+            assistant: reconnectPayload.assistant,
+          };
+        }
+      }
     } catch {
       resetCallState();
       setError(
@@ -216,14 +395,13 @@ export function useRobotKioskController({
     }
   }
 
-  // Stops the active Vapi call.
-  // We rely on the call-end event for final state cleanup.
   async function stopConversation() {
     if (!vapiRef.current || !inCall || isStopping) {
       return;
     }
 
     try {
+      stopRequestedRef.current = true;
       setIsStopping(true);
       await vapiRef.current.stop();
     } catch {
@@ -232,17 +410,26 @@ export function useRobotKioskController({
     }
   }
 
-  // Derived presentation state consumed by RobotKiosk UI component.
-  const status = resolveKioskStatus({ error, isStopping, isSpeaking, inCall, armed });
+  const status = resolveKioskStatus({
+    error,
+    isReconnecting,
+    isStopping,
+    isSpeaking,
+    inCall,
+    armed,
+  });
   const statusText = status === "error" ? error : STATUS_TEXT[status];
 
   return {
     armed,
     error,
     inCall,
+    isReconnecting,
     isSpeaking,
     isStarting,
     isStopping,
+    networkLabel,
+    networkTone,
     startConversation,
     status,
     statusText,

@@ -15,6 +15,7 @@ const BUTTON_BASE_CLASS =
 
 const STATUS_STYLES: Record<KioskStatus, string> = {
   error: "border-rose-300/50 bg-rose-300/15 text-rose-100",
+  reconnecting: "border-orange-200/45 bg-orange-300/15 text-orange-50",
   stopping: "border-orange-200/45 bg-orange-300/15 text-orange-50",
   speaking: "border-orange-200/45 bg-orange-300/15 text-orange-50",
   inCall: "border-orange-100/35 bg-black/20 text-orange-100",
@@ -22,13 +23,23 @@ const STATUS_STYLES: Record<KioskStatus, string> = {
   locked: "border-amber-300/40 bg-amber-300/10 text-amber-100",
 };
 
+const NETWORK_BADGE_STYLES = {
+  neutral: "border-white/20 bg-black/20 text-white/80",
+  good: "border-emerald-300/40 bg-emerald-300/15 text-emerald-100",
+  warn: "border-amber-300/40 bg-amber-300/15 text-amber-100",
+  bad: "border-rose-300/40 bg-rose-300/15 text-rose-100",
+} as const;
+
 export function RobotKiosk({ publicKey, assistantId }: RobotKioskProps) {
   const {
     armed,
     inCall,
+    isReconnecting,
     isSpeaking,
     isStarting,
     isStopping,
+    networkLabel,
+    networkTone,
     startConversation,
     status,
     statusText,
@@ -56,7 +67,7 @@ export function RobotKiosk({ publicKey, assistantId }: RobotKioskProps) {
             <button
               type="button"
               onClick={wakeRobot}
-              className={`glow-btn ${BUTTON_BASE_CLASS} border border-orange-200/35 bg-gradient-to-b from-orange-500 to-orange-600 font-semibold text-orange-50 hover:brightness-110 focus:outline-none focus-visible:ring-4 focus-visible:ring-orange-300/45`}
+              className={`glow-btn ${BUTTON_BASE_CLASS} border border-orange-200/35 bg-linear-to-b from-orange-500 to-orange-600 font-semibold text-orange-50 hover:brightness-110 focus:outline-none focus-visible:ring-4 focus-visible:ring-orange-300/45`}
             >
               Wake Robot
             </button>
@@ -65,7 +76,7 @@ export function RobotKiosk({ publicKey, assistantId }: RobotKioskProps) {
           <button
             type="button"
             onClick={startConversation}
-            disabled={!armed || isStarting || inCall}
+            disabled={!armed || isStarting || isReconnecting || inCall}
             className={`${BUTTON_BASE_CLASS} border border-orange-200/40 bg-transparent font-medium text-orange-100 hover:border-orange-100 hover:bg-orange-300/10`}
           >
             {isStarting ? "Starting..." : inCall ? "Connected" : "Start"}
@@ -103,6 +114,12 @@ export function RobotKiosk({ publicKey, assistantId }: RobotKioskProps) {
           >
             {statusText}
           </p>
+          <div
+            className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide ${NETWORK_BADGE_STYLES[networkTone]}`}
+          >
+            <span className="h-2 w-2 rounded-full bg-current" />
+            Network {networkLabel}
+          </div>
           <p className="mt-10 text-[11px] tracking-[0.3em] text-white/50 uppercase">
             © 2026 Moderati
           </p>
