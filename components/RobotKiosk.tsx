@@ -98,7 +98,7 @@ export function RobotKiosk({ publicKey, assistantId }: RobotKioskProps) {
           <button
             type="button"
             onClick={() => {
-              playStart();
+              // playStart();
               void startConversation();
             }}
             disabled={isStartDisabled}
@@ -109,7 +109,7 @@ export function RobotKiosk({ publicKey, assistantId }: RobotKioskProps) {
           <button
             type="button"
             onClick={() => {
-              playStop();
+              // playStop();
               void stopConversation();
             }}
             disabled={!inCall || isStopping}
