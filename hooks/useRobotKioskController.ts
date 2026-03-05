@@ -134,6 +134,18 @@ function getArmedServerSnapshot() {
   return false;
 }
 
+function subscribeHydration() {
+  return () => {};
+}
+
+function getHydratedSnapshot() {
+  return true;
+}
+
+function getHydratedServerSnapshot() {
+  return false;
+}
+
 // Subscription API required by useSyncExternalStore.
 function subscribeArmedStore(listener: () => void) {
   armedStoreListeners.add(listener);
@@ -208,6 +220,11 @@ export function useRobotKioskController({
     subscribeArmedStore,
     getArmedSnapshot,
     getArmedServerSnapshot
+  );
+  const isHydrated = useSyncExternalStore(
+    subscribeHydration,
+    getHydratedSnapshot,
+    getHydratedServerSnapshot
   );
 
   const vapiRef = useRef<Vapi | null>(null);
@@ -292,14 +309,7 @@ export function useRobotKioskController({
       setIsSpeaking(false);
     };
 
-    const handleNetworkQuality = (event: unknown) => {
-      const label = getNetworkLabelFromEvent(event);
-      if (!label) return;
-      setNetworkLabel(label);
-      setNetworkTone(getNetworkTone(label));
-    };
-
-    const handleNetworkConnection = (event: unknown) => {
+    const updateNetworkStateFromEvent = (event: unknown) => {
       const label = getNetworkLabelFromEvent(event);
       if (!label) return;
       setNetworkLabel(label);
@@ -310,8 +320,8 @@ export function useRobotKioskController({
     vapi.on("call-end", handleCallEnd);
     vapi.on("speech-start", handleSpeechStart);
     vapi.on("speech-end", handleSpeechEnd);
-    vapi.on("network-quality-change", handleNetworkQuality);
-    vapi.on("network-connection", handleNetworkConnection);
+    vapi.on("network-quality-change", updateNetworkStateFromEvent);
+    vapi.on("network-connection", updateNetworkStateFromEvent);
     vapi.on("error", handleError);
 
     return () => {
@@ -319,8 +329,8 @@ export function useRobotKioskController({
       vapi.off("call-end", handleCallEnd);
       vapi.off("speech-start", handleSpeechStart);
       vapi.off("speech-end", handleSpeechEnd);
-      vapi.off("network-quality-change", handleNetworkQuality);
-      vapi.off("network-connection", handleNetworkConnection);
+      vapi.off("network-quality-change", updateNetworkStateFromEvent);
+      vapi.off("network-connection", updateNetworkStateFromEvent);
       vapi.off("error", handleError);
       void vapi.stop();
       vapiRef.current = null;
@@ -424,6 +434,7 @@ export function useRobotKioskController({
     armed,
     error,
     inCall,
+    isHydrated,
     isReconnecting,
     isSpeaking,
     isStarting,
