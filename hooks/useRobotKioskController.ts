@@ -41,6 +41,25 @@ const STATUS_TEXT: Record<KioskStatus, string> = {
   locked: "Tap Wake Robot to enable microphone",
 };
 
+const BACKGROUND_SPEECH_DENOISING_PLAN: NonNullable<
+  Parameters<Vapi["start"]>[1]
+>["backgroundSpeechDenoisingPlan"] = {
+  smartDenoisingPlan: {
+    enabled: true,
+  },
+  fourierDenoisingPlan: {
+      enabled: true,
+      mediaDetectionEnabled: true,
+      baselineOffsetDb: -10, // Aggressive filtering
+      windowSizeMs: 2000,    // Fast adaptation
+      baselinePercentile: 90 // Focus on clear speech
+  },
+};
+
+const ASSISTANT_OVERRIDES: NonNullable<Parameters<Vapi["start"]>[1]> = {
+  backgroundSpeechDenoisingPlan: BACKGROUND_SPEECH_DENOISING_PLAN,
+};
+
 function normalizeText(value: unknown): string {
   return typeof value === "string" ? value.toLowerCase() : "";
 }
@@ -369,7 +388,7 @@ export function useRobotKioskController({
 
       const webCall = await vapiRef.current.start(
         assistantId,
-        undefined,
+        ASSISTANT_OVERRIDES,
         undefined,
         undefined,
         undefined,

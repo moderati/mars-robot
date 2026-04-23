@@ -1,10 +1,14 @@
 "use client";
 
+import { fetchControllerState, setControllerActive } from "@/lib/controllerApi";
 import {
   KioskStatus,
   useRobotKioskController,
 } from "@/hooks/useRobotKioskController";
 import { useKioskSounds } from "@/hooks/useKioskSounds";
+import Link from "next/link";
+import { useEffect, useRef } from "react";
+import useSWR from "swr";
 
 type RobotKioskProps = {
   publicKey: string;
@@ -64,10 +68,58 @@ export function RobotKiosk({ publicKey, assistantId }: RobotKioskProps) {
     wakeRobot,
   } = useRobotKioskController({ publicKey, assistantId });
 
+  const { data: controllerState, mutate: mutateControllerState } = useSWR(
+    "/api/controller",
+    fetchControllerState,
+    {
+      refreshInterval: 1000,
+      revalidateOnFocus: false,
+    }
+  );
+
+  const lastAppliedControllerUpdateRef = useRef<number | null>(null);
+  const startConversationRef = useRef(startConversation);
+  const stopConversationRef = useRef(stopConversation);
+
+  useEffect(() => {
+    startConversationRef.current = startConversation;
+    stopConversationRef.current = stopConversation;
+  }, [startConversation, stopConversation]);
+
+  useEffect(() => {
+    if (!controllerState) return;
+    if (lastAppliedControllerUpdateRef.current === controllerState.updatedAt) {
+      return;
+    }
+
+    lastAppliedControllerUpdateRef.current = controllerState.updatedAt;
+
+    if (controllerState.active) {
+      void startConversationRef.current();
+      return;
+    }
+
+    void stopConversationRef.current();
+  }, [controllerState]);
+
   const { playStart, playStop } = useKioskSounds();
 
   const isStartDisabled =
     !isHydrated || !armed || isStarting || isReconnecting || inCall;
+
+  async function handleStart() {
+    const nextControllerState = await setControllerActive(true);
+    lastAppliedControllerUpdateRef.current = nextControllerState.updatedAt;
+    void mutateControllerState(nextControllerState, false);
+    await startConversation();
+  }
+
+  async function handleStop() {
+    const nextControllerState = await setControllerActive(false);
+    lastAppliedControllerUpdateRef.current = nextControllerState.updatedAt;
+    void mutateControllerState(nextControllerState, false);
+    await stopConversation();
+  }
 
   return (
     <main className="flex min-h-screen items-center justify-center p-4 sm:p-6">
@@ -99,7 +151,7 @@ export function RobotKiosk({ publicKey, assistantId }: RobotKioskProps) {
             type="button"
             onClick={() => {
               // playStart();
-              void startConversation();
+              void handleStart();
             }}
             disabled={isStartDisabled}
             className={`${BUTTON_BASE_CLASS} border border-orange-200/40 bg-transparent font-medium text-orange-100 hover:border-orange-100 hover:bg-orange-300/10`}
@@ -110,7 +162,7 @@ export function RobotKiosk({ publicKey, assistantId }: RobotKioskProps) {
             type="button"
             onClick={() => {
               // playStop();
-              void stopConversation();
+              void handleStop();
             }}
             disabled={!inCall || isStopping}
             className={`${BUTTON_BASE_CLASS} border border-rose-300/45 bg-rose-500/15 font-medium text-rose-100 hover:bg-rose-500/25`}
@@ -149,6 +201,14 @@ export function RobotKiosk({ publicKey, assistantId }: RobotKioskProps) {
             <span className="h-2 w-2 rounded-full bg-current" />
             Network {networkLabel}
           </div>
+
+          <Link
+            href="/controller"
+            className="rounded-full border border-orange-200/35 px-5 py-2 text-sm font-semibold text-orange-100 transition hover:border-orange-100 hover:bg-orange-300/10"
+          >
+            Open Controller
+          </Link>
+
           <p className="mt-10 text-[11px] tracking-[0.3em] text-white/50 uppercase">
             © 2026 Moderati
           </p>
