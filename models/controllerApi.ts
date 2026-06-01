@@ -114,9 +114,23 @@ async function requestJson<T>(
   return (await response.json()) as T;
 }
 
+function getBackendHttpUrl() {
+  const configuredUrl = process.env.NEXT_PUBLIC_BACKEND_HTTP_URL?.trim();
+
+  if (!configuredUrl) {
+    return "";
+  }
+
+  return configuredUrl.replace(/\/$/, "");
+}
+
+function getBackendPath(path: string) {
+  return `${getBackendHttpUrl()}${path}`;
+}
+
 export async function fetchControllerState() {
   return requestJson<ControllerState>(
-    "/api/controller",
+    getBackendPath("/api/controller"),
     {
       cache: "no-store",
     },
@@ -126,7 +140,7 @@ export async function fetchControllerState() {
 
 export async function fetchKioskStatus() {
   return requestJson<KioskStatusSnapshot>(
-    "/api/kiosk-status",
+    getBackendPath("/api/kiosk-status"),
     {
       cache: "no-store",
     },
@@ -137,7 +151,7 @@ export async function fetchKioskStatus() {
 // iPhone controller writes this; iPad kiosk reacts to it.
 export async function setRobotActive(isRobotActive: boolean) {
   return requestJson<ControllerState>(
-    "/api/controller",
+    getBackendPath("/api/controller"),
     {
       method: "POST",
       headers: {
@@ -156,7 +170,7 @@ export async function publishKioskStatus(
   status: Omit<KioskStatusSnapshot, "updatedAt" | "online">
 ) {
   return requestJson<KioskStatusSnapshot>(
-    "/api/kiosk-status",
+    getBackendPath("/api/kiosk-status"),
     {
       method: "POST",
       headers: {
@@ -169,6 +183,18 @@ export async function publishKioskStatus(
 }
 
 function getControllerSocketUrl() {
+  const configuredUrl = process.env.NEXT_PUBLIC_BACKEND_WS_URL?.trim();
+
+  if (configuredUrl) {
+    return configuredUrl;
+  }
+
+  const backendHttpUrl = getBackendHttpUrl();
+
+  if (backendHttpUrl) {
+    return `${backendHttpUrl.replace(/^http/, "ws")}/api/controller/ws`;
+  }
+
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${window.location.host}/api/controller/ws`;
 }

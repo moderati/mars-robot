@@ -3,9 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node server.mjs",
+    "dev": "next dev",
+    "dev:backend": "node backend/server.mjs",
     "build": "next build",
-    "start": "NODE_ENV=production node server.mjs",
+    "start": "next start",
+    "start:backend": "node backend/server.mjs",
     "lint": "eslint"
   },
   "dependencies": {
