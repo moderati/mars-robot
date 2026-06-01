@@ -1,5 +1,5 @@
-import { RobotKiosk } from "@/components/RobotKiosk";
-import { env } from "@/lib/env";
+import { RobotKiosk } from "@/views/kiosk/RobotKiosk";
+import { env } from "@/models/env";
 
 export default function Home() {
   return (
