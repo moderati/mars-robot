@@ -91,7 +91,7 @@ export const VAPI_ASSISTANT_OVERRIDES: VapiAssistantOverrides = {
 
   // Turn-taking: quick responses, but not so quick that short pauses get cut off.
   startSpeakingPlan: {
-    waitSeconds: 0.5,
+    waitSeconds: 0.2,
     smartEndpointingPlan: {
       provider: "livekit",
       waitFunction:
